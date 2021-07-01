@@ -1112,6 +1112,13 @@ impl tokenization::Config for Runtime {
     type CountryInfoSource = BitCountryModule;
 }
 
+impl blindbox::Config for Runtime {
+    type Event = Event;
+    type ModuleId = CountryFundModuleId;
+    type Randomness = RandomnessCollectiveFlip;
+    type MaxGenerateRandom = MaxGenerateRandom;
+}
+
 construct_runtime!(
 	pub enum Runtime where
 		Block = Block,
@@ -1164,6 +1171,7 @@ construct_runtime!(
         Currencies: orml_currencies::{ Module, Storage, Call, Event<T>},
         Tokens: orml_tokens::{ Module, Storage, Call, Event<T>},
         TokenizationModule: tokenization:: {Module, Call, Storage, Event<T>},
+        Blindbox: blindbox:: {Module, Call, Storage, Event<T>},
 	}
 );
 
