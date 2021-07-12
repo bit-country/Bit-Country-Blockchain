@@ -19,9 +19,11 @@
 use blindbox_manager::{ BlindBoxType , BlindBoxRewardItem};
 use codec::{Decode, Encode};
 use frame_support::{ensure, decl_storage};
+use frame_support::{traits::{Currency, ExistenceRequirement, ReservableCurrency, LockableCurrency}};
 use frame_system::{ensure_root, ensure_signed};
 use primitives::{Balance, CountryId, CurrencyId, BlindBoxId};
 use sp_runtime::{traits::{AccountIdConversion, One}, DispatchError, ModuleId, RuntimeDebug};
+use sp_runtime::SaturatedConversion;
 use bc_country::*;
 use sp_std::vec::Vec;
 use frame_support::pallet_prelude::*;
@@ -48,6 +50,10 @@ pub mod pallet {
     #[pallet::generate_store(trait Store)]
     pub struct Pallet<T>(PhantomData<T>);
 
+    pub(super) type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+
+    pub const DOLLARS: Balance = 1_000_000_000_000_000_000;
+
     #[pallet::config]
     pub trait Config: frame_system::Config {
         type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
@@ -64,8 +70,8 @@ pub mod pallet {
         // Maximum number of KSM allowed
         type MaxKSMAllowed: Get<u32>;
 
-        // Maximum number of NUUM allowed
-        type MaxNUUMAllowed: Get<u32>;
+        // Maximum number of NUUM boxes allowed
+        type MaxNUUMBoxAllowed: Get<u32>;
 
         // Maximum number of collectable NFT allowed
         type MaxCollectableNFTAllowed: Get<u32>;
@@ -81,6 +87,9 @@ pub mod pallet {
 
         // Maximum number of NFT shoes allowed
         type MaxNFTShoesAllowed: Get<u32>;
+
+        type Currency: ReservableCurrency<Self::AccountId>
+        + LockableCurrency<Self::AccountId, Moment=Self::BlockNumber>;
     }
 
     #[pallet::storage]
@@ -93,8 +102,8 @@ pub mod pallet {
     pub type BlindBoxes<T: Config> = StorageMap<_, Twox64Concat, BlindBoxId, (), OptionQuery>;
 
     #[pallet::storage]
-    #[pallet::getter(fn get_blindboxescreators)]
-    pub type BlindBoxesCreators<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, (), OptionQuery>;
+    #[pallet::getter(fn get_blindboxescreator)]
+    pub type BlindBoxesCreator<T: Config> = StorageValue<_, T::AccountId, ValueQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn all_blindboxes_count)]
@@ -192,7 +201,7 @@ pub mod pallet {
 
             // Ensure the authorized caller can call this func
             ensure!(
-                proposed_amount <= T::MaxNUUMAllowed::get(),
+                proposed_amount <= T::MaxNUUMBoxAllowed::get(),
                 Error::<T>::ExceedsMaxNUUMAllowed
             );
 
@@ -286,7 +295,7 @@ pub mod pallet {
         pub(super) fn set_blindbox_caller(origin: OriginFor<T>, account_id: T::AccountId ) -> DispatchResultWithPostInfo {
             let _ = ensure_root(origin)?;
 
-            BlindBoxesCreators::<T>::insert(account_id, ());
+            BlindBoxesCreator::<T>::put(account_id);
 
             Ok(().into())
         }
@@ -297,7 +306,7 @@ pub mod pallet {
 
             // Ensure the authorized caller can call this func
             ensure!(
-                BlindBoxesCreators::<T>::contains_key(&caller),
+                BlindBoxesCreator::<T>::get() == caller,
                 Error::<T>::NoPermission
             );
 
@@ -345,17 +354,34 @@ pub mod pallet {
                 Error::<T>::BlindBoxDoesNotExist
             );
 
+            // Remove from BlindBoxes
+            BlindBoxes::<T>::remove(blindbox_id);
+
+            // Update AvailableBlindBoxesCount
+            let available_blindbox_count = Self::all_blindboxes_count();
+
+            let new_available_blindbox_count = available_blindbox_count.checked_sub(One::one()).ok_or("Overflow subtracting new count to available blindboxes")?;
+            AvailableBlindBoxesCount::<T>::put(new_available_blindbox_count);
+
             let max_range = 10000;
             // Generate a random number between 1 and 100000
             let mut random_number = Self::generate_random_number(blindbox_id) % max_range + 1;
 
-            let (is_winning, blindbox_reward_item) = Self::check_winner(&owner, blindbox_id, max_range, random_number);
-
-            if is_winning {
-                Self::save_blindbox_reward(&owner, blindbox_id, blindbox_reward_item.clone());
-                Self::deposit_event(Event::<T>::BlindBoxOpened(owner, blindbox_id.clone(), blindbox_reward_item.blindbox_type, blindbox_reward_item.amount));
-            } else {
+            if random_number % 5 == 0 {
+                // 20% chance has no winning
                 Self::deposit_event(Event::<T>::BlindBoxGoodLuckNextTime(owner, blindbox_id.clone()));
+            } else {
+                // 80% chance has winning, generate a new random number
+                random_number = Self::generate_random_number(random_number) % max_range + 1;
+
+                let (is_winning, blindbox_reward_item) = Self::check_winner(&owner, blindbox_id, max_range, random_number);
+
+                if is_winning {
+                    Self::save_blindbox_reward(&owner, blindbox_id, blindbox_reward_item.clone());
+                    Self::deposit_event(Event::<T>::BlindBoxOpened(owner, blindbox_id.clone(), blindbox_reward_item.blindbox_type, blindbox_reward_item.amount));
+                } else {
+                    Self::deposit_event(Event::<T>::BlindBoxGoodLuckNextTime(owner, blindbox_id.clone()));
+                }
             }
 
             Ok(().into())
@@ -381,17 +407,8 @@ impl<T: Config> Pallet<T> {
     }
 
     fn save_blindbox_reward(owner: &T::AccountId, blindbox_id: BlindBoxId, blindbox_reward_item :BlindBoxRewardItem<T::AccountId, BlindBoxId>) -> Result<BlindBoxId, DispatchError> {
-        // Remove from BlindBoxes
-        BlindBoxes::<T>::remove(blindbox_id);
-
         // Add to BlindBoxRewards
         BlindBoxRewards::<T>::insert( blindbox_id, owner, blindbox_reward_item);
-
-        // Update AvailableBlindBoxesCount
-        let available_blindbox_count = Self::all_blindboxes_count();
-
-        let new_available_blindbox_count = available_blindbox_count.checked_sub(One::one()).ok_or("Overflow subtracting new count to available blindboxes")?;
-        AvailableBlindBoxesCount::<T>::put(new_available_blindbox_count);
 
         Ok(blindbox_id)
     }
@@ -410,7 +427,7 @@ impl<T: Config> Pallet<T> {
             }
             BlindBoxType::NUUM=>{
                 let available_amount = Self::get_available_nuum();
-                if available_amount >= distributed_amount{
+                if available_amount >= distributed_amount {
                     let new_available_amount = available_amount - distributed_amount;
                     AvailableNUUM::<T>::put(new_available_amount);
                     return true;
@@ -479,7 +496,6 @@ impl<T: Config> Pallet<T> {
 
         if random_number % max_number == 0 {
             // 1/10000 chance of winning collectable NFT
-
             let available = Self::check_and_deduct_rewards_availability(BlindBoxType::CollectableNFT, 1);
             if available {
                 blindbox_reward_item.blindbox_type = BlindBoxType::CollectableNFT;
@@ -557,14 +573,35 @@ impl<T: Config> Pallet<T> {
             // 25% testnet nuum
             let nuum_amount = Self::generate_random_number(random_number) % max_nuum_amount + 1;
             let distributed_amount = nuum_amount*10000;
-            let available = Self::check_and_deduct_rewards_availability(BlindBoxType::NUUM, distributed_amount);
+            let available = Self::check_and_deduct_rewards_availability(BlindBoxType::NUUM, 1);
             if available {
                 blindbox_reward_item.amount = distributed_amount; // 10000 = 1 NUUM
                 blindbox_reward_item.blindbox_type = BlindBoxType::NUUM;
                 is_winning = true;
+
+                Self::transfer_nuum(&owner, nuum_amount);
             }
         }
 
         (is_winning, blindbox_reward_item)
+    }
+
+    fn u128_to_balance(input: u128) -> BalanceOf<T> {
+        input.saturated_into()
+    }
+
+    fn transfer_nuum(owner: &T::AccountId, nuum_amount: u32) {
+        let caller = BlindBoxesCreator::<T>::get();
+
+        let newAmount = u128::from(nuum_amount);
+        let balance = Self::u128_to_balance(newAmount*DOLLARS);
+        //Transfer balance from buy it now user to asset owner
+        let currency_transfer = <T as Config>::Currency::transfer(&caller, &owner, balance, ExistenceRequirement::KeepAlive);
+
+        match currency_transfer {
+            Err(_e) => {}
+            Ok(_v) => {
+            }
+        }
     }
 }

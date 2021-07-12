@@ -97,7 +97,7 @@ parameter_types! {
 	pub const CountryFundModuleId: ModuleId = ModuleId(*b"bit/fund");
     pub const MaxNumberOfBlindBox: u32 = 50;
     pub const MaxKSMAllowed: u32 = 200000;
-    pub const MaxNUUMAllowed: u32 = 100000;
+    pub const MaxNUUMAllowed: u32 = 100;
     pub const MaxCollectableNFTAllowed: u32 = 5;
     pub const MaxNFTHatAllowed: u32 = 200;
     pub const MaxNFTJacketAllowed: u32 = 200;
@@ -111,12 +111,13 @@ impl Config for Runtime {
     type Randomness = TestRandomness<Self>;
     type MaxNumberOfBlindBox = MaxNumberOfBlindBox;
     type MaxKSMAllowed = MaxKSMAllowed;
-    type MaxNUUMAllowed = MaxNUUMAllowed;
+    type MaxNUUMBoxAllowed = MaxNUUMAllowed;
     type MaxCollectableNFTAllowed = MaxCollectableNFTAllowed;
     type MaxNFTHatAllowed = MaxNFTHatAllowed;
     type MaxNFTJacketAllowed = MaxNFTJacketAllowed;
     type MaxNFTPantAllowed = MaxNFTPantAllowed;
     type MaxNFTShoesAllowed = MaxNFTShoesAllowed;
+    type Currency = Balances;
 }
 
 construct_runtime!(
