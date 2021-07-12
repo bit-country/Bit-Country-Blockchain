@@ -16,7 +16,8 @@
 // limitations under the License.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-use blindbox_manager::{ BlindBoxType , BlindBoxRewardItem};
+
+use blindbox_manager::{BlindBoxType, BlindBoxRewardItem};
 use codec::{Decode, Encode};
 use frame_support::{ensure, decl_storage};
 use frame_support::{traits::{Currency, ExistenceRequirement, ReservableCurrency, LockableCurrency}};
@@ -38,6 +39,7 @@ mod tests;
 pub use pallet::*;
 use sp_core::H256;
 use frame_support::traits::Randomness;
+use sp_core::sp_std::convert::TryInto;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -150,8 +152,8 @@ pub mod pallet {
     #[pallet::metadata(T::AccountId = "AccountId")]
     pub enum Event<T: Config> {
         BlindBoxIdGenerated(Vec<u32>),
-        BlindBoxOpened(T::AccountId, BlindBoxId,  BlindBoxType, u32),
-        BlindBoxGoodLuckNextTime(T::AccountId, BlindBoxId)
+        BlindBoxOpened(T::AccountId, BlindBoxId, BlindBoxType, u32),
+        BlindBoxGoodLuckNextTime(T::AccountId, BlindBoxId),
     }
 
     #[pallet::error]
@@ -175,13 +177,13 @@ pub mod pallet {
         // Exceeds the maximum amount of NFT pant allowed
         ExceedsMaxNFTPantAllowed,
         // Exceeds the maximum amount of NFT shoes allowed
-        ExceedsMaxNFTShoesAllowed
+        ExceedsMaxNFTShoesAllowed,
     }
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
         #[pallet::weight(10_000)]
-        pub(super) fn set_available_ksm(origin: OriginFor<T>, available_ksm: u32 ) -> DispatchResultWithPostInfo {
+        pub(super) fn set_available_ksm(origin: OriginFor<T>, available_ksm: u32) -> DispatchResultWithPostInfo {
             let _ = ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
@@ -196,7 +198,7 @@ pub mod pallet {
         }
 
         #[pallet::weight(10_000)]
-        pub(super) fn set_available_nuum(origin: OriginFor<T>, proposed_amount: u32 ) -> DispatchResultWithPostInfo {
+        pub(super) fn set_available_nuum(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
             let _ = ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
@@ -212,7 +214,7 @@ pub mod pallet {
         }
 
         #[pallet::weight(10_000)]
-        pub(super) fn set_available_collectable_nft(origin: OriginFor<T>, proposed_amount: u32 ) -> DispatchResultWithPostInfo {
+        pub(super) fn set_available_collectable_nft(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
             let _ = ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
@@ -228,7 +230,7 @@ pub mod pallet {
         }
 
         #[pallet::weight(10_000)]
-        pub(super) fn set_available_nft_hat(origin: OriginFor<T>, proposed_amount: u32 ) -> DispatchResultWithPostInfo {
+        pub(super) fn set_available_nft_hat(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
             let _ = ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
@@ -244,7 +246,7 @@ pub mod pallet {
         }
 
         #[pallet::weight(10_000)]
-        pub(super) fn set_available_nft_jacket(origin: OriginFor<T>, proposed_amount: u32 ) -> DispatchResultWithPostInfo {
+        pub(super) fn set_available_nft_jacket(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
             let _ = ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
@@ -260,7 +262,7 @@ pub mod pallet {
         }
 
         #[pallet::weight(10_000)]
-        pub(super) fn set_available_nft_pant(origin: OriginFor<T>, proposed_amount: u32 ) -> DispatchResultWithPostInfo {
+        pub(super) fn set_available_nft_pant(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
             let _ = ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
@@ -276,7 +278,7 @@ pub mod pallet {
         }
 
         #[pallet::weight(10_000)]
-        pub(super) fn set_available_nft_shoes(origin: OriginFor<T>, proposed_amount: u32 ) -> DispatchResultWithPostInfo {
+        pub(super) fn set_available_nft_shoes(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
             let _ = ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
@@ -292,7 +294,7 @@ pub mod pallet {
         }
 
         #[pallet::weight(10_000)]
-        pub(super) fn set_blindbox_caller(origin: OriginFor<T>, account_id: T::AccountId ) -> DispatchResultWithPostInfo {
+        pub(super) fn set_blindbox_caller(origin: OriginFor<T>, account_id: T::AccountId) -> DispatchResultWithPostInfo {
             let _ = ensure_root(origin)?;
 
             BlindBoxesCreator::<T>::put(account_id);
@@ -398,7 +400,7 @@ impl<T: Config> Pallet<T> {
     // You should call this function with different seed values until the random
     // number lies within `u32.Max`.
     // https://github.com/paritytech/substrate/issues/8311
-    fn generate_random_number(seed :u32) -> u32 {
+    fn generate_random_number(seed: u32) -> u32 {
         let random_seed = T::Randomness::random(&("pallet-blindbox", seed).encode());
 
         let random_number = <u32>::decode(&mut random_seed.as_ref())
@@ -406,26 +408,26 @@ impl<T: Config> Pallet<T> {
         random_number
     }
 
-    fn save_blindbox_reward(owner: &T::AccountId, blindbox_id: BlindBoxId, blindbox_reward_item :BlindBoxRewardItem<T::AccountId, BlindBoxId>) -> Result<BlindBoxId, DispatchError> {
+    fn save_blindbox_reward(owner: &T::AccountId, blindbox_id: BlindBoxId, blindbox_reward_item: BlindBoxRewardItem<T::AccountId, BlindBoxId>) -> Result<BlindBoxId, DispatchError> {
         // Add to BlindBoxRewards
-        BlindBoxRewards::<T>::insert( blindbox_id, owner, blindbox_reward_item);
+        BlindBoxRewards::<T>::insert(blindbox_id, owner, blindbox_reward_item);
 
         Ok(blindbox_id)
     }
 
     fn check_and_deduct_rewards_availability(blindbox_type: BlindBoxType, distributed_amount: u32) -> (bool) {
         match blindbox_type {
-            BlindBoxType::KSM =>{
+            BlindBoxType::KSM => {
                 // Deduct distribute amount from available KSM and update
                 let available_amount = Self::get_available_ksm();
-                if available_amount >= distributed_amount{
+                if available_amount >= distributed_amount {
                     let new_available_amount = available_amount - distributed_amount;
                     AvailableKSM::<T>::put(new_available_amount);
                     return true;
                 }
                 return false;
             }
-            BlindBoxType::NUUM=>{
+            BlindBoxType::NUUM => {
                 let available_amount = Self::get_available_nuum();
                 if available_amount >= distributed_amount {
                     let new_available_amount = available_amount - distributed_amount;
@@ -434,7 +436,7 @@ impl<T: Config> Pallet<T> {
                 }
                 return false;
             }
-            BlindBoxType::CollectableNFT=>{
+            BlindBoxType::CollectableNFT => {
                 let available_amount = Self::get_available_collectablenft();
                 if available_amount >= distributed_amount {
                     let new_available_amount = available_amount - distributed_amount;
@@ -443,7 +445,7 @@ impl<T: Config> Pallet<T> {
                 }
                 return false;
             }
-            BlindBoxType::MainnetNFTHat1 | BlindBoxType::MainnetNFTHat2=>{
+            BlindBoxType::MainnetNFTHat1 | BlindBoxType::MainnetNFTHat2 => {
                 let available_amount = Self::get_available_nft_hat();
                 if available_amount >= distributed_amount {
                     let new_available_amount = available_amount - distributed_amount;
@@ -452,7 +454,7 @@ impl<T: Config> Pallet<T> {
                 }
                 return false;
             }
-            BlindBoxType::MainnetNFTJacket1 | BlindBoxType::MainnetNFTJacket2=>{
+            BlindBoxType::MainnetNFTJacket1 | BlindBoxType::MainnetNFTJacket2 => {
                 let available_amount = Self::get_available_nft_jacket();
                 if available_amount >= distributed_amount {
                     let new_available_amount = available_amount - distributed_amount;
@@ -461,7 +463,7 @@ impl<T: Config> Pallet<T> {
                 }
                 return false;
             }
-            BlindBoxType::MainnetNFTPants1 | BlindBoxType::MainnetNFTPants2=>{
+            BlindBoxType::MainnetNFTPants1 | BlindBoxType::MainnetNFTPants2 => {
                 let available_amount = Self::get_available_nft_pant();
                 if available_amount >= distributed_amount {
                     let new_available_amount = available_amount - distributed_amount;
@@ -470,7 +472,7 @@ impl<T: Config> Pallet<T> {
                 }
                 return false;
             }
-            BlindBoxType::MainnetNFTShoes1 | BlindBoxType::MainnetNFTShoes2=>{
+            BlindBoxType::MainnetNFTShoes1 | BlindBoxType::MainnetNFTShoes2 => {
                 let available_amount = Self::get_available_nft_shoes();
                 if available_amount >= distributed_amount {
                     let new_available_amount = available_amount - distributed_amount;
@@ -482,12 +484,12 @@ impl<T: Config> Pallet<T> {
         }
     }
 
-    fn check_winner (owner: &T::AccountId, blindbox_id: BlindBoxId, max_number: u32, random_number: u32) -> (bool, BlindBoxRewardItem<T::AccountId, BlindBoxId>) {
+    fn check_winner(owner: &T::AccountId, blindbox_id: BlindBoxId, max_number: u32, random_number: u32) -> (bool, BlindBoxRewardItem<T::AccountId, BlindBoxId>) {
         let mut blindbox_reward_item = BlindBoxRewardItem {
             recipient: owner.clone(),
             amount: 0,
             blindbox_type: BlindBoxType::NUUM,
-            blindBoxId: blindbox_id
+            blindBoxId: blindbox_id,
         };
 
         let mut is_winning = false;
@@ -536,7 +538,7 @@ impl<T: Config> Pallet<T> {
                     let new_rand = Self::generate_random_number(reminder);
                     if new_rand % 2 == 0 {
                         blindbox_reward_item.blindbox_type = BlindBoxType::MainnetNFTJacket1;
-                    }else{
+                    } else {
                         blindbox_reward_item.blindbox_type = BlindBoxType::MainnetNFTJacket2;
                     }
                     blindbox_reward_item.amount = 1;
@@ -572,7 +574,7 @@ impl<T: Config> Pallet<T> {
         } else if random_number % 4 == 0 {
             // 25% testnet nuum
             let nuum_amount = Self::generate_random_number(random_number) % max_nuum_amount + 1;
-            let distributed_amount = nuum_amount*10000;
+            let distributed_amount = nuum_amount * 10000;
             let available = Self::check_and_deduct_rewards_availability(BlindBoxType::NUUM, 1);
             if available {
                 blindbox_reward_item.amount = distributed_amount; // 10000 = 1 NUUM
@@ -586,22 +588,14 @@ impl<T: Config> Pallet<T> {
         (is_winning, blindbox_reward_item)
     }
 
-    fn u128_to_balance(input: u128) -> BalanceOf<T> {
-        input.saturated_into()
-    }
-
     fn transfer_nuum(owner: &T::AccountId, nuum_amount: u32) {
         let caller = BlindBoxesCreator::<T>::get();
+        let nuum_in_u128: u128 = nuum_amount.saturated_into();
+        let amount_in_balance: u128 = (nuum_in_u128 * DOLLARS);
 
-        let newAmount = u128::from(nuum_amount);
-        let balance = Self::u128_to_balance(newAmount*DOLLARS);
+        let balance: BalanceOf<T> = TryInto::<BalanceOf<T>>::try_into(amount_in_balance).unwrap_or_default();
+
         //Transfer balance from buy it now user to asset owner
-        let currency_transfer = <T as Config>::Currency::transfer(&caller, &owner, balance, ExistenceRequirement::KeepAlive);
-
-        match currency_transfer {
-            Err(_e) => {}
-            Ok(_v) => {
-            }
-        }
+        <T as Config>::Currency::transfer(&caller, &owner, balance, ExistenceRequirement::KeepAlive);
     }
 }
