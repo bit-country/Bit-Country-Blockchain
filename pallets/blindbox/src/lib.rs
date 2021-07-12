@@ -182,9 +182,9 @@ pub mod pallet {
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-        #[pallet::weight(10_000)]
+        #[pallet::weight(100_000)]
         pub(super) fn set_available_ksm(origin: OriginFor<T>, available_ksm: u32) -> DispatchResultWithPostInfo {
-            let _ = ensure_root(origin)?;
+            ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
             ensure!(
@@ -197,9 +197,9 @@ pub mod pallet {
             Ok(().into())
         }
 
-        #[pallet::weight(10_000)]
+        #[pallet::weight(100_000)]
         pub(super) fn set_available_nuum(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
-            let _ = ensure_root(origin)?;
+            ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
             ensure!(
@@ -213,9 +213,9 @@ pub mod pallet {
             Ok(().into())
         }
 
-        #[pallet::weight(10_000)]
+        #[pallet::weight(100_000)]
         pub(super) fn set_available_collectable_nft(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
-            let _ = ensure_root(origin)?;
+            ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
             ensure!(
@@ -229,9 +229,9 @@ pub mod pallet {
             Ok(().into())
         }
 
-        #[pallet::weight(10_000)]
+        #[pallet::weight(100_000)]
         pub(super) fn set_available_nft_hat(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
-            let _ = ensure_root(origin)?;
+            ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
             ensure!(
@@ -245,10 +245,9 @@ pub mod pallet {
             Ok(().into())
         }
 
-        #[pallet::weight(10_000)]
+        #[pallet::weight(100_000)]
         pub(super) fn set_available_nft_jacket(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
-            let _ = ensure_root(origin)?;
-
+            ensure_root(origin)?;
             // Ensure the authorized caller can call this func
             ensure!(
                 proposed_amount <= T::MaxNFTJacketAllowed::get(),
@@ -261,9 +260,9 @@ pub mod pallet {
             Ok(().into())
         }
 
-        #[pallet::weight(10_000)]
+        #[pallet::weight(100_000)]
         pub(super) fn set_available_nft_pant(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
-            let _ = ensure_root(origin)?;
+            ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
             ensure!(
@@ -277,9 +276,9 @@ pub mod pallet {
             Ok(().into())
         }
 
-        #[pallet::weight(10_000)]
+        #[pallet::weight(100_000)]
         pub(super) fn set_available_nft_shoes(origin: OriginFor<T>, proposed_amount: u32) -> DispatchResultWithPostInfo {
-            let _ = ensure_root(origin)?;
+            ensure_root(origin)?;
 
             // Ensure the authorized caller can call this func
             ensure!(
@@ -293,16 +292,16 @@ pub mod pallet {
             Ok(().into())
         }
 
-        #[pallet::weight(10_000)]
+        #[pallet::weight(100_000)]
         pub(super) fn set_blindbox_caller(origin: OriginFor<T>, account_id: T::AccountId) -> DispatchResultWithPostInfo {
-            let _ = ensure_root(origin)?;
+            ensure_root(origin)?;
 
             BlindBoxesCreator::<T>::put(account_id);
 
             Ok(().into())
         }
 
-        #[pallet::weight(10_000)]
+        #[pallet::weight(100_000_000)]
         pub(super) fn generate_blindbox_ids(origin: OriginFor<T>, number_blindboxes: u32) -> DispatchResultWithPostInfo {
             let caller = ensure_signed(origin)?;
 
@@ -333,10 +332,10 @@ pub mod pallet {
                     blindbox_vec.push(blindbox_id);
                     BlindBoxes::<T>::insert(blindbox_id, ());
 
-                    number_blindboxes_generated = number_blindboxes_generated.checked_add(1).ok_or("Overflow")?;
+                    number_blindboxes_generated = number_blindboxes_generated.checked_add(One::one()).ok_or("Overflow")?;
                 }
 
-                i = i.checked_add(1).ok_or("Overflow")?;
+                i = i.checked_add(One::one()).ok_or("Overflow")?;
             }
 
             AvailableBlindBoxesCount::<T>::put(number_blindboxes_generated);
@@ -346,7 +345,7 @@ pub mod pallet {
             Ok(().into())
         }
 
-        #[pallet::weight(10_000)]
+        #[pallet::weight(9_000_000_000_000)]
         pub(super) fn open_blind_box(origin: OriginFor<T>, blindbox_id: BlindBoxId) -> DispatchResultWithPostInfo {
             let owner = ensure_signed(origin)?;
 
@@ -365,16 +364,16 @@ pub mod pallet {
             let new_available_blindbox_count = available_blindbox_count.checked_sub(One::one()).ok_or("Overflow subtracting new count to available blindboxes")?;
             AvailableBlindBoxesCount::<T>::put(new_available_blindbox_count);
 
-            let max_range = 10000;
+            let max_range: u32 = 10000;
             // Generate a random number between 1 and 100000
-            let mut random_number = Self::generate_random_number(blindbox_id) % max_range + 1;
+            let mut random_number = Self::generate_random_number(blindbox_id) % max_range.checked_add(One::one()).ok_or("Overflow")?;
 
             if random_number % 5 == 0 {
                 // 20% chance has no winning
                 Self::deposit_event(Event::<T>::BlindBoxGoodLuckNextTime(owner, blindbox_id.clone()));
             } else {
                 // 80% chance has winning, generate a new random number
-                random_number = Self::generate_random_number(random_number) % max_range + 1;
+                random_number = Self::generate_random_number(random_number) % max_range.checked_add(One::one()).ok_or("Overflow")?;
 
                 let (is_winning, blindbox_reward_item) = Self::check_winner(&owner, blindbox_id, max_range, random_number);
 
@@ -395,11 +394,6 @@ pub mod pallet {
 }
 
 impl<T: Config> Pallet<T> {
-    // Generate a random number from a given seed.
-    // Note that there is potential bias introduced by using modulus operator.
-    // You should call this function with different seed values until the random
-    // number lies within `u32.Max`.
-    // https://github.com/paritytech/substrate/issues/8311
     fn generate_random_number(seed: u32) -> u32 {
         let random_seed = T::Randomness::random(&("pallet-blindbox", seed).encode());
 
@@ -493,8 +487,8 @@ impl<T: Config> Pallet<T> {
         };
 
         let mut is_winning = false;
-        let max_nuum_amount = 20;
-        let distribute_ksm_amount = 500; // 0.05 KSM
+        let max_nuum_amount: u32 = 20;
+        let distribute_ksm_amount: u32 = 500; // 0.05 KSM
 
         if random_number % max_number == 0 {
             // 1/10000 chance of winning collectable NFT
@@ -573,8 +567,9 @@ impl<T: Config> Pallet<T> {
             }
         } else if random_number % 4 == 0 {
             // 25% testnet nuum
-            let nuum_amount = Self::generate_random_number(random_number) % max_nuum_amount + 1;
-            let distributed_amount = nuum_amount * 10000;
+            let max_nuum_amount_added_one = max_nuum_amount.saturating_add(One::one());
+            let nuum_amount = Self::generate_random_number(random_number) % max_nuum_amount_added_one;
+            let distributed_amount = nuum_amount.saturating_mul(10000);
             let available = Self::check_and_deduct_rewards_availability(BlindBoxType::NUUM, 1);
             if available {
                 blindbox_reward_item.amount = distributed_amount; // 10000 = 1 NUUM
@@ -590,8 +585,8 @@ impl<T: Config> Pallet<T> {
 
     fn transfer_nuum(owner: &T::AccountId, nuum_amount: u32) {
         let caller = BlindBoxesCreator::<T>::get();
-        let nuum_in_u128: u128 = nuum_amount.saturated_into();
-        let amount_in_balance: u128 = (nuum_in_u128 * DOLLARS);
+        let nuum_amount_in_128: u128 = nuum_amount.saturated_into();
+        let amount_in_balance: u128 = (nuum_amount_in_128 * DOLLARS);
 
         let balance: BalanceOf<T> = TryInto::<BalanceOf<T>>::try_into(amount_in_balance).unwrap_or_default();
 
