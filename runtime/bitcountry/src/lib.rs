@@ -103,7 +103,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 269,
+    spec_version: 273,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 2,
@@ -1133,6 +1133,7 @@ impl blindbox::Config for Runtime {
     type MaxNFTPantAllowed = MaxNFTPantAllowed;
     type MaxNFTShoesAllowed = MaxNFTShoesAllowed;
     type Currency = Balances;
+    type TreasuryModuleId = BitCountryTreasuryModuleId;
 }
 
 construct_runtime!(

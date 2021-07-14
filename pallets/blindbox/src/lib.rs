@@ -23,12 +23,15 @@ use frame_support::{ensure, decl_storage};
 use frame_support::{traits::{Currency, ExistenceRequirement, ReservableCurrency, LockableCurrency}};
 use frame_system::{ensure_root, ensure_signed};
 use primitives::{Balance, CountryId, CurrencyId, BlindBoxId};
-use sp_runtime::{traits::{AccountIdConversion, One}, DispatchError, ModuleId, RuntimeDebug};
+use sp_runtime::{traits::{AccountIdConversion, One}, DispatchError, ModuleId, RuntimeDebug, DispatchResult};
 use sp_runtime::SaturatedConversion;
 use bc_country::*;
 use sp_std::vec::Vec;
 use frame_support::pallet_prelude::*;
 use frame_system::pallet_prelude::*;
+
+#[cfg(feature = "std")]
+use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
 mod mock;
@@ -40,6 +43,13 @@ pub use pallet::*;
 use sp_core::H256;
 use frame_support::traits::Randomness;
 use sp_core::sp_std::convert::TryInto;
+
+#[derive(Encode, Decode, Copy, Clone, PartialEq, Eq, RuntimeDebug)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+pub enum BoxType {
+    NormalBox,
+    SpecialBox,
+}
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -92,6 +102,9 @@ pub mod pallet {
 
         type Currency: ReservableCurrency<Self::AccountId>
         + LockableCurrency<Self::AccountId, Moment=Self::BlockNumber>;
+
+        #[pallet::constant]
+        type TreasuryModuleId: Get<ModuleId>;
     }
 
     #[pallet::storage]
@@ -104,12 +117,20 @@ pub mod pallet {
     pub type BlindBoxes<T: Config> = StorageMap<_, Twox64Concat, BlindBoxId, (), OptionQuery>;
 
     #[pallet::storage]
+    #[pallet::getter(fn get_special_blindboxes)]
+    pub type SpecialBlindBoxes<T: Config> = StorageMap<_, Twox64Concat, BlindBoxId, (), OptionQuery>;
+
+    #[pallet::storage]
     #[pallet::getter(fn get_blindboxescreator)]
     pub type BlindBoxesCreator<T: Config> = StorageValue<_, T::AccountId, ValueQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn all_blindboxes_count)]
     pub(super) type AvailableBlindBoxesCount<T: Config> = StorageValue<_, u32, ValueQuery>;
+
+    #[pallet::storage]
+    #[pallet::getter(fn all_special_blindboxes_count)]
+    pub(super) type SpecialAvailableBlindBoxesCount<T: Config> = StorageValue<_, u32, ValueQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn get_available_ksm)]
@@ -345,47 +366,82 @@ pub mod pallet {
             Ok(().into())
         }
 
-        #[pallet::weight(9_000_000_000_000)]
+        #[pallet::weight(100_000_000)]
+        pub(super) fn generate_special_blindbox_ids(origin: OriginFor<T>, number_blindboxes: u32) -> DispatchResultWithPostInfo {
+            let caller = ensure_signed(origin)?;
+
+            // Ensure the authorized caller can call this func
+            ensure!(
+                BlindBoxesCreator::<T>::get() == caller,
+                Error::<T>::NoPermission
+            );
+
+            // Ensure caller can only generate blindboxes once all the available blindboxes have been used
+            ensure!(
+                SpecialAvailableBlindBoxesCount::<T>::get() == 0,
+                Error::<T>::BlindBoxesStillAvailable
+            );
+
+            let mut blindbox_vec = Vec::new();
+
+            // Generate random blindbox id and store
+            let mut number_blindboxes_generated = 0;
+            let mut i = 0;
+
+            // Add safe check in case of infinite loop, running extra 10 loops to generate unique blindbox id
+            while number_blindboxes_generated < number_blindboxes && i < T::MaxNumberOfBlindBox::get() {
+                let mut blindbox_id = Self::generate_random_number(i);
+
+                if !SpecialBlindBoxes::<T>::contains_key(blindbox_id) {
+                    // Push to Vec and save to storage
+                    blindbox_vec.push(blindbox_id);
+                    SpecialBlindBoxes::<T>::insert(blindbox_id, ());
+
+                    number_blindboxes_generated = number_blindboxes_generated.checked_add(One::one()).ok_or("Overflow")?;
+                }
+
+                i = i.checked_add(One::one()).ok_or("Overflow")?;
+            }
+
+            SpecialAvailableBlindBoxesCount::<T>::put(number_blindboxes_generated);
+
+            Self::deposit_event(Event::BlindBoxIdGenerated(blindbox_vec));
+
+            Ok(().into())
+        }
+
+        #[pallet::weight(90_000_000_000)]
         pub(super) fn open_blind_box(origin: OriginFor<T>, blindbox_id: BlindBoxId) -> DispatchResultWithPostInfo {
             let owner = ensure_signed(origin)?;
 
             // Ensure the specified blindbox id exist in storage
             ensure!(
-                BlindBoxes::<T>::contains_key(blindbox_id),
+                BlindBoxes::<T>::contains_key(blindbox_id) == true || SpecialBlindBoxes::<T>::contains_key(blindbox_id) == true,
                 Error::<T>::BlindBoxDoesNotExist
             );
 
-            // Remove from BlindBoxes
-            BlindBoxes::<T>::remove(blindbox_id);
+            let open_box_fee = 1 * DOLLARS;
+            let balance: BalanceOf<T> = TryInto::<BalanceOf<T>>::try_into(open_box_fee).unwrap_or_default();
+            let treasury_module_id = T::TreasuryModuleId::get().into_account();
 
-            // Update AvailableBlindBoxesCount
-            let available_blindbox_count = Self::all_blindboxes_count();
+            <T as Config>::Currency::transfer(&owner, &treasury_module_id, balance, ExistenceRequirement::KeepAlive)?;
 
-            let new_available_blindbox_count = available_blindbox_count.checked_sub(One::one()).ok_or("Overflow subtracting new count to available blindboxes")?;
-            AvailableBlindBoxesCount::<T>::put(new_available_blindbox_count);
+            if BlindBoxes::<T>::contains_key(blindbox_id) {
+                // Remove from Blind Boxes
+                BlindBoxes::<T>::remove(blindbox_id);
 
-            let max_range: u32 = 10000;
-            // Generate a random number between 1 and 100000
-            let mut random_number = Self::generate_random_number(blindbox_id) % max_range.checked_add(One::one()).ok_or("Overflow")?;
+                Self::handle_open_box_logic(blindbox_id, owner, BoxType::NormalBox);
 
-            if random_number % 5 == 0 {
-                // 20% chance has no winning
-                Self::deposit_event(Event::<T>::BlindBoxGoodLuckNextTime(owner, blindbox_id.clone()));
+                Ok(().into())
+            } else if SpecialBlindBoxes::<T>::contains_key(blindbox_id) {
+                // Remove from Special Blind Boxes
+                SpecialBlindBoxes::<T>::remove(blindbox_id);
+
+                Self::handle_open_box_logic(blindbox_id, owner, BoxType::SpecialBox);
+                Ok(().into())
             } else {
-                // 80% chance has winning, generate a new random number
-                random_number = Self::generate_random_number(random_number) % max_range.checked_add(One::one()).ok_or("Overflow")?;
-
-                let (is_winning, blindbox_reward_item) = Self::check_winner(&owner, blindbox_id, max_range, random_number);
-
-                if is_winning {
-                    Self::save_blindbox_reward(&owner, blindbox_id, blindbox_reward_item.clone());
-                    Self::deposit_event(Event::<T>::BlindBoxOpened(owner, blindbox_id.clone(), blindbox_reward_item.blindbox_type, blindbox_reward_item.amount));
-                } else {
-                    Self::deposit_event(Event::<T>::BlindBoxGoodLuckNextTime(owner, blindbox_id.clone()));
-                }
+                Ok(().into())
             }
-
-            Ok(().into())
         }
     }
 
@@ -592,5 +648,68 @@ impl<T: Config> Pallet<T> {
 
         //Transfer balance from buy it now user to asset owner
         <T as Config>::Currency::transfer(&caller, &owner, balance, ExistenceRequirement::KeepAlive);
+    }
+
+    fn handle_open_box_logic(blindbox_id: BlindBoxId, owner: T::AccountId, box_type: BoxType) -> DispatchResult {
+        match box_type {
+            BoxType::NormalBox => {
+                let available_blindbox_count = Self::all_blindboxes_count();
+
+                let new_available_blindbox_count = available_blindbox_count.checked_sub(One::one()).ok_or("Overflow subtracting new count to available blindboxes")?;
+                AvailableBlindBoxesCount::<T>::put(new_available_blindbox_count);
+
+                let max_range: u32 = 10000;
+                // Generate a random number between 1 and 100000
+                let mut random_number = Self::generate_random_number(blindbox_id) % max_range.checked_add(One::one()).ok_or("Overflow")?;
+
+                if random_number % 5 == 0 {
+                    // 20% chance has no winning
+                    Self::deposit_event(Event::<T>::BlindBoxGoodLuckNextTime(owner, blindbox_id.clone()));
+                } else {
+                    // 80% chance has winning, generate a new random number
+                    random_number = Self::generate_random_number(random_number) % max_range.checked_add(One::one()).ok_or("Overflow")?;
+
+                    let (is_winning, blindbox_reward_item) = Self::check_winner(&owner, blindbox_id, max_range, random_number);
+
+                    if is_winning {
+                        Self::save_blindbox_reward(&owner, blindbox_id, blindbox_reward_item.clone());
+                        Self::deposit_event(Event::<T>::BlindBoxOpened(owner, blindbox_id.clone(), blindbox_reward_item.blindbox_type, blindbox_reward_item.amount));
+                    } else {
+                        Self::deposit_event(Event::<T>::BlindBoxGoodLuckNextTime(owner, blindbox_id.clone()));
+                    }
+                }
+
+                Ok(())
+            }
+            BoxType::SpecialBox => {
+                let available_blindbox_count = Self::all_special_blindboxes_count();
+
+                let new_available_blindbox_count = available_blindbox_count.checked_sub(One::one()).ok_or("Overflow subtracting new count to available blindboxes")?;
+                SpecialAvailableBlindBoxesCount::<T>::put(new_available_blindbox_count);
+
+                let max_range: u32 = 10000;
+                // Generate a random number between 1 and 100000
+                let mut random_number = Self::generate_random_number(blindbox_id) % max_range.checked_add(One::one()).ok_or("Overflow")?;
+
+                if random_number % 5 == 0 {
+                    // 20% chance has no winning
+                    Self::deposit_event(Event::<T>::BlindBoxGoodLuckNextTime(owner, blindbox_id.clone()));
+                } else {
+                    // 80% chance has winning, generate a new random number
+                    random_number = Self::generate_random_number(random_number) % max_range.checked_add(One::one()).ok_or("Overflow")?;
+
+                    let (is_winning, blindbox_reward_item) = Self::check_winner(&owner, blindbox_id, max_range, random_number);
+
+                    if is_winning {
+                        Self::save_blindbox_reward(&owner, blindbox_id, blindbox_reward_item.clone());
+                        Self::deposit_event(Event::<T>::BlindBoxOpened(owner, blindbox_id.clone(), blindbox_reward_item.blindbox_type, blindbox_reward_item.amount));
+                    } else {
+                        Self::deposit_event(Event::<T>::BlindBoxGoodLuckNextTime(owner, blindbox_id.clone()));
+                    }
+                }
+
+                Ok(())
+            }
+        }
     }
 }
