@@ -168,6 +168,10 @@ pub mod pallet {
     #[pallet::getter(fn nonce)]
     pub(super) type Nonce<T: Config> = StorageValue<_, u32, ValueQuery>;
 
+    #[pallet::storage]
+    #[pallet::getter(fn get_blacklist)]
+    pub type ReportedBlacklist<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, (), OptionQuery>;
+
     #[pallet::event]
     #[pallet::generate_deposit(pub (super) fn deposit_event)]
     #[pallet::metadata(T::AccountId = "AccountId")]
@@ -175,6 +179,8 @@ pub mod pallet {
         BlindBoxIdGenerated(Vec<u32>),
         BlindBoxOpened(T::AccountId, BlindBoxId, BlindBoxType, u32),
         BlindBoxGoodLuckNextTime(T::AccountId, BlindBoxId),
+        BlacklistAdded(T::AccountId),
+        BlacklistRemoved(T::AccountId),
     }
 
     #[pallet::error]
@@ -199,6 +205,12 @@ pub mod pallet {
         ExceedsMaxNFTPantAllowed,
         // Exceeds the maximum amount of NFT shoes allowed
         ExceedsMaxNFTShoesAllowed,
+        // Blacklist entries already exist
+        BlacklistAlreadyExist,
+        // Blacklist entries is not exist
+        BlacklistIsNotExist,
+        // Account is on black list
+        BlacklistReported,
     }
 
     #[pallet::call]
@@ -376,12 +388,6 @@ pub mod pallet {
                 Error::<T>::NoPermission
             );
 
-            // Ensure caller can only generate blindboxes once all the available blindboxes have been used
-            ensure!(
-                SpecialAvailableBlindBoxesCount::<T>::get() == 0,
-                Error::<T>::BlindBoxesStillAvailable
-            );
-
             let mut blindbox_vec = Vec::new();
 
             // Generate random blindbox id and store
@@ -389,7 +395,7 @@ pub mod pallet {
             let mut i = 0;
 
             // Add safe check in case of infinite loop, running extra 10 loops to generate unique blindbox id
-            while number_blindboxes_generated < number_blindboxes && i < T::MaxNumberOfBlindBox::get() {
+            while number_blindboxes_generated < number_blindboxes {
                 let mut blindbox_id = Self::generate_random_number(i);
 
                 if !SpecialBlindBoxes::<T>::contains_key(blindbox_id) {
@@ -416,7 +422,7 @@ pub mod pallet {
 
             // Ensure the specified blindbox id exist in storage
             ensure!(
-                BlindBoxes::<T>::contains_key(blindbox_id) == true || SpecialBlindBoxes::<T>::contains_key(blindbox_id) == true,
+                BlindBoxes::<T>::contains_key(blindbox_id) || SpecialBlindBoxes::<T>::contains_key(blindbox_id),
                 Error::<T>::BlindBoxDoesNotExist
             );
 
@@ -425,6 +431,11 @@ pub mod pallet {
             let treasury_module_id = T::TreasuryModuleId::get().into_account();
 
             <T as Config>::Currency::transfer(&owner, &treasury_module_id, balance, ExistenceRequirement::KeepAlive)?;
+
+            ensure!(
+                !ReportedBlacklist::<T>::contains_key(owner.clone()),
+                Error::<T>::BlacklistReported
+            );
 
             if BlindBoxes::<T>::contains_key(blindbox_id) {
                 // Remove from Blind Boxes
@@ -438,10 +449,43 @@ pub mod pallet {
                 SpecialBlindBoxes::<T>::remove(blindbox_id);
 
                 Self::handle_open_box_logic(blindbox_id, owner, BoxType::SpecialBox);
+
                 Ok(().into())
             } else {
                 Ok(().into())
             }
+        }
+
+        #[pallet::weight(100_000_000)]
+        pub(super) fn add_new_blacklist(origin: OriginFor<T>, account_id: T::AccountId) -> DispatchResultWithPostInfo {
+            ensure_root(origin)?;
+
+            ensure!(
+                !ReportedBlacklist::<T>::contains_key(account_id.clone()),
+                Error::<T>::BlacklistAlreadyExist
+            );
+
+            ReportedBlacklist::<T>::insert(account_id.clone(), ());
+
+            Self::deposit_event(Event::BlacklistAdded(account_id));
+
+            Ok(().into())
+        }
+
+        #[pallet::weight(100_000_000)]
+        pub(super) fn remove_blacklist(origin: OriginFor<T>, account_id: T::AccountId) -> DispatchResultWithPostInfo {
+            ensure_root(origin)?;
+
+            ensure!(
+                ReportedBlacklist::<T>::contains_key(account_id.clone()),
+                Error::<T>::BlacklistIsNotExist
+            );
+
+            ReportedBlacklist::<T>::remove(account_id.clone());
+
+            Self::deposit_event(Event::BlacklistRemoved(account_id));
+
+            Ok(().into())
         }
     }
 
